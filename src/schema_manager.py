@@ -4,7 +4,7 @@ import re
 from pyspark.sql import functions as F
 
 
-# Stable business columns required by the assessment.
+# Columns that are expected to remain stable across files.
 STABLE_FIELDS = {
     "date",
     "serial_number",
@@ -22,10 +22,9 @@ STABLE_FIELDS = {
 
 def calculate_schema_hash(df):
     """
-    Create a deterministic hash of the incoming schema.
+    Create a hash from column names and Spark data types.
 
-    The hash is stored with the processed data so that
-    different source schemas can be identified.
+    The hash helps identify schema changes between files.
     """
 
     schema_string = "|".join(
@@ -40,16 +39,15 @@ def calculate_schema_hash(df):
 
 def identify_smart_columns(df):
     """
-    Identify SMART attributes dynamically.
+    Dynamically identify SMART attribute columns.
 
-    Backblaze SMART columns follow patterns such as:
+    Example:
         smart_1_normalized
         smart_1_raw
         smart_5_normalized
         smart_5_raw
 
-    We detect them using a regular expression instead of
-    maintaining a hardcoded list of SMART column names.
+    No complete SMART column list is hardcoded.
     """
 
     smart_pattern = re.compile(
@@ -66,12 +64,12 @@ def identify_smart_columns(df):
 
 def detect_schema_drift(current_columns, previous_columns):
     """
-    Compare the current file schema with the previous schema.
+    Compare current and previous column names.
 
-    Returns added and removed columns.
-
-    A type change can be detected separately using the
-    schema hash.
+    Returns:
+        added_columns
+        removed_columns
+        has_schema_drift
     """
 
     current = set(current_columns)
@@ -89,8 +87,10 @@ def detect_schema_drift(current_columns, previous_columns):
 
 def align_required_columns(df):
     """
-    Validate required business columns and normalize
-    their data types.
+    Validate and standardize the columns required by the pipeline.
+
+    SMART columns are not required because they can be added,
+    removed, or missing because of schema drift.
     """
 
     required_columns = {
@@ -101,11 +101,14 @@ def align_required_columns(df):
         "failure"
     }
 
-    missing_columns = required_columns - set(df.columns)
+    missing_columns = (
+        required_columns - set(df.columns)
+    )
 
     if missing_columns:
         raise ValueError(
-            f"Missing required columns: {sorted(missing_columns)}"
+            f"Missing required columns: "
+            f"{sorted(missing_columns)}"
         )
 
     return (
@@ -127,10 +130,10 @@ def align_required_columns(df):
 
 def prepare_daily_dataframe(spark, file_path):
     """
-    Read and prepare one daily Backblaze CSV.
+    Read one daily CSV and prepare it for processing.
 
-    Only one source file is processed at a time, helping
-    maintain the assessment's memory constraint.
+    The file is processed independently so that the complete
+    historical dataset does not need to be loaded into memory.
     """
 
     df = (
@@ -140,6 +143,7 @@ def prepare_daily_dataframe(spark, file_path):
         .csv(file_path)
     )
 
+    # Capture the original schema before adding pipeline columns.
     schema_hash = calculate_schema_hash(df)
 
     smart_columns = identify_smart_columns(df)
@@ -160,6 +164,15 @@ def prepare_daily_dataframe(spark, file_path):
 
     schema_metadata = {
         "columns": df.columns,
+        "original_columns": [
+            field.name
+            for field in df.schema.fields
+            if field.name not in {
+                "drive_date",
+                "source_file",
+                "schema_hash"
+            }
+        ],
         "smart_columns": smart_columns,
         "schema_hash": schema_hash
     }
