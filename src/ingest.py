@@ -3,67 +3,90 @@ from pyspark.sql import functions as F
 
 def discover_files(spark, input_path):
     """
-    Discover CSV files from the input location.
+    Discover daily CSV files from the input location.
 
-    In AWS Glue, input_path can be an S3 prefix.
+    Only file paths are collected to the driver.
+    Raw data is never collected to the driver.
     """
 
-    files = (
+    files_df = (
         spark.read
         .format("binaryFile")
         .option("pathGlobFilter", "*.csv")
         .load(input_path)
         .select("path")
-        .orderBy("path")
-        .collect()
     )
 
-    return [row["path"] for row in files]
+    return [
+        row["path"]
+        for row in files_df.orderBy("path").collect()
+    ]
 
 
 def filter_unprocessed(spark, files, control_path):
     """
-    Process only files that are not already marked SUCCESS.
+    Return only source files that have not already been
+    successfully processed.
 
-    The control table contains:
-    source_file, status, row_count, schema_hash, processed_at
+    The control data contains:
+        source_file
+        status
+        row_count
+        schema_hash
+        processed_at
     """
 
     if not files:
         return []
 
+    candidate_df = spark.createDataFrame(
+        [(file_path,) for file_path in files],
+        ["source_file"]
+    )
+
     try:
-        processed = (
+        processed_df = (
             spark.read
             .parquet(control_path)
-            .filter(F.col("status") == "SUCCESS")
+            .filter(
+                F.col("status") == "SUCCESS"
+            )
             .select("source_file")
             .distinct()
         )
 
-        candidate_df = spark.createDataFrame(
-            [(file_path,) for file_path in files],
-            ["source_file"]
-        )
-
-        new_files = (
+        new_files_df = (
             candidate_df
-            .join(processed, on="source_file", how="left_anti")
-            .select("source_file")
+            .join(
+                processed_df,
+                on="source_file",
+                how="left_anti"
+            )
             .orderBy("source_file")
-            .collect()
         )
 
-        return [row["source_file"] for row in new_files]
+        return [
+            row["source_file"]
+            for row in new_files_df.collect()
+        ]
 
-    except Exception:
-        # First run: control table does not exist.
+    except Exception as exc:
+
+        # On the first run the control location may not exist.
+        # In that case all discovered files are candidates.
+        print(
+            f"Control state not available yet: {exc}"
+        )
+
         return files
 
 
 def read_daily_csv(spark, file_path):
     """
-    Read one daily Backblaze CSV.
+    Read one daily Backblaze CSV file.
+
+    One file is processed at a time to keep the driver
+    memory bounded.
     """
 
     return (
@@ -71,4 +94,44 @@ def read_daily_csv(spark, file_path):
         .option("header", True)
         .option("inferSchema", True)
         .csv(file_path)
+    )
+
+
+def build_control_record(
+    spark,
+    file_path,
+    df,
+    schema_hash,
+    status="SUCCESS"
+):
+    """
+    Create a control-state record for a processed file.
+
+    The record should be written only after the output
+    for the source file has been successfully created.
+    """
+
+    return spark.createDataFrame(
+        [
+            (
+                file_path,
+                str(
+                    df.select("drive_date")
+                    .first()["drive_date"]
+                ),
+                status,
+                df.count(),
+                schema_hash
+            )
+        ],
+        [
+            "source_file",
+            "file_date",
+            "status",
+            "row_count",
+            "schema_hash"
+        ]
+    ).withColumn(
+        "processed_at",
+        F.current_timestamp()
     )
