@@ -7,27 +7,30 @@ def write_analytics(
     quality_path,
     output_path
 ):
+    """
+    Generate the required assessment analytics from the
+    compact aggregate and quality layers.
+
+    The raw CSV history is not rescanned here.
+    """
 
     aggregate_df = (
         spark.read
         .parquet(aggregate_path)
     )
 
-    # -------------------------------------------------
-    # 1. AFR BY MODEL
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # 1. AFR by model
+    # ---------------------------------------------------------
+    #
+    # AFR = failures / drive-days * 365.25 * 100
 
     afr_by_model = (
         aggregate_df
         .groupBy("model")
         .agg(
-            F.sum("drive_days").alias(
-                "drive_days"
-            ),
-
-            F.sum("failure_count").alias(
-                "failure_count"
-            )
+            F.sum("drive_days").alias("drive_days"),
+            F.sum("failure_count").alias("failure_count")
         )
         .withColumn(
             "afr_percent",
@@ -37,13 +40,13 @@ def write_analytics(
                 / F.col("drive_days")
                 * 365.25
                 * 100
-            )
+            ).otherwise(0)
         )
     )
 
-    # -------------------------------------------------
-    # 2. TOP 10 MOST RELIABLE
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # 2. Top 10 reliable models
+    # ---------------------------------------------------------
 
     top_10_reliable = (
         afr_by_model
@@ -53,9 +56,9 @@ def write_analytics(
         .limit(10)
     )
 
-    # -------------------------------------------------
-    # 3. TOP 10 LEAST RELIABLE
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # 3. Top 10 least reliable models
+    # ---------------------------------------------------------
 
     top_10_unreliable = (
         afr_by_model
@@ -65,9 +68,25 @@ def write_analytics(
         .limit(10)
     )
 
-    # -------------------------------------------------
-    # 4. MONTHLY FAILURE TREND
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # 4. Manufacturer statistics
+    # ---------------------------------------------------------
+
+    manufacturer_stats = (
+        aggregate_df
+        .groupBy("manufacturer")
+        .agg(
+            F.sum("drive_days").alias("drive_days"),
+            F.sum("failure_count").alias("failure_count")
+        )
+        .orderBy(
+            F.col("failure_count").desc()
+        )
+    )
+
+    # ---------------------------------------------------------
+    # 5. Monthly failure trend
+    # ---------------------------------------------------------
 
     monthly_failure_trend = (
         aggregate_df
@@ -80,20 +99,15 @@ def write_analytics(
         )
         .groupBy("month")
         .agg(
-            F.sum("drive_days").alias(
-                "drive_days"
-            ),
-
-            F.sum("failure_count").alias(
-                "failure_count"
-            )
+            F.sum("drive_days").alias("drive_days"),
+            F.sum("failure_count").alias("failure_count")
         )
         .orderBy("month")
     )
 
-    # -------------------------------------------------
-    # 5. DATA QUALITY
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # 6. Data quality summary
+    # ---------------------------------------------------------
 
     quality_df = (
         spark.read
@@ -103,21 +117,17 @@ def write_analytics(
     data_quality_summary = (
         quality_df
         .agg(
-            F.sum("total_records").alias(
-                "total_records"
-            ),
+            F.sum("total_records")
+            .alias("total_records"),
 
-            F.sum("missing_smart_records").alias(
-                "missing_smart_records"
-            ),
+            F.sum("missing_smart_records")
+            .alias("missing_smart_records"),
 
-            F.sum("schema_drift_records").alias(
-                "schema_drift_records"
-            ),
+            F.sum("schema_drift_records")
+            .alias("schema_drift_records"),
 
-            F.sum("affected_records").alias(
-                "affected_records"
-            )
+            F.sum("affected_records")
+            .alias("affected_records")
         )
         .withColumn(
             "affected_percentage",
@@ -126,40 +136,64 @@ def write_analytics(
                 F.col("affected_records")
                 / F.col("total_records")
                 * 100
-            )
+            ).otherwise(0)
         )
     )
 
-    # -------------------------------------------------
-    # WRITE OUTPUTS
-    # -------------------------------------------------
+    # ---------------------------------------------------------
+    # Write analytics outputs
+    # ---------------------------------------------------------
 
-    afr_by_model.write.mode(
-        "overwrite"
-    ).parquet(
-        f"{output_path}/afr_by_model"
+    (
+        afr_by_model
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/afr_by_model"
+        )
     )
 
-    top_10_reliable.write.mode(
-        "overwrite"
-    ).parquet(
-        f"{output_path}/top_10_reliable"
+    (
+        top_10_reliable
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/top_10_reliable"
+        )
     )
 
-    top_10_unreliable.write.mode(
-        "overwrite"
-    ).parquet(
-        f"{output_path}/top_10_unreliable"
+    (
+        top_10_unreliable
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/top_10_unreliable"
+        )
     )
 
-    monthly_failure_trend.write.mode(
-        "overwrite"
-    ).parquet(
-        f"{output_path}/monthly_failure_trend"
+    (
+        manufacturer_stats
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/manufacturer_stats"
+        )
     )
 
-    data_quality_summary.write.mode(
-        "overwrite"
-    ).parquet(
-        f"{output_path}/data_quality_summary"
+    (
+        monthly_failure_trend
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/monthly_failure_trend"
+        )
+    )
+
+    (
+        data_quality_summary
+        .write
+        .mode("overwrite")
+        .parquet(
+            f"{output_path}/data_quality_summary"
+        )
     )
