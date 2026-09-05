@@ -4,7 +4,7 @@ PySpark + AWS solution design for the Backblaze Hard Drive Test Data assessment.
 
 ## Overview
 
-This project implements a scalable PySpark-based data engineering solution for processing two full years of Backblaze Hard Drive Test Data.
+This project provides a scalable PySpark-based data engineering solution for processing two full years of Backblaze Hard Drive Test Data.
 
 The solution is designed to handle:
 
