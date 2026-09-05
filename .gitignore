@@ -1,0 +1,15 @@
+data/
+*.csv
+*.zip
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.aws/
+spark-warehouse/
+.metastore/
+.vscode/
+.idea/
+output/*
+!output/.gitkeep
