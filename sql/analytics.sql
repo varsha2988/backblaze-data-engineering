@@ -3,10 +3,12 @@
 -- SQL reference queries for AWS Athena / Spark SQL
 -- ============================================================
 
+
 -- ============================================================
--- 1. Annualized Failure Rate (AFR) by Model
+-- 1. AFR by Model
 -- ============================================================
--- AFR = failures / drive-days * 365.25 * 100
+-- Annualized Failure Rate (AFR):
+-- AFR = (Failures / Drive-Days) * 365.25 * 100
 
 SELECT
     model,
@@ -51,18 +53,16 @@ LIMIT 10;
 
 
 -- ============================================================
--- 4. Drive-days and Failures by Manufacturer
+-- 4. Drive-Days and Failures by Manufacturer
 -- ============================================================
--- Manufacturer is derived from the first token of the model name.
--- This is a practical proxy when a separate manufacturer field
--- is not available in the source data.
+-- Manufacturer is created during the PySpark aggregation step.
 
 SELECT
-    regexp_extract(model, '^([^ ]+)', 1) AS manufacturer,
+    manufacturer,
     SUM(drive_days) AS drive_days,
     SUM(failure_count) AS failure_count
 FROM aggregate_data
-GROUP BY regexp_extract(model, '^([^ ]+)', 1)
+GROUP BY manufacturer
 ORDER BY failure_count DESC;
 
 
@@ -80,10 +80,8 @@ ORDER BY month;
 
 
 -- ============================================================
--- 6. Data Quality Summary
+-- 6. Overall Data Quality Summary
 -- ============================================================
--- affected_percentage represents records affected by either
--- missing SMART data or schema drift.
 
 SELECT
     SUM(total_records) AS total_records,
@@ -98,7 +96,7 @@ FROM quality_data;
 
 
 -- ============================================================
--- 7. Monthly Data Quality Trend
+-- 7. Data Quality Trend by Date
 -- ============================================================
 
 SELECT
